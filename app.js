@@ -222,9 +222,16 @@
     rms = Math.sqrt(rms / n);
     if (rms < gateFromSensitivity()) return -1;
 
+    const raw = yinFreq(buf, sampleRate);
     const filtered = yinFreq(lowpassBass(buf, sampleRate), sampleRate);
-    if (filtered > 0) return filtered;
-    return yinFreq(buf, sampleRate);
+    if (filtered < 0) return raw;
+    if (raw < 0) return filtered;
+    // The lowpass fixes the open E, which reads sharp. On the A string it
+    // pulls the note flat, so trust it fully around E and fade it out by A.
+    const w = Math.max(0, Math.min(1, (52 - raw) / (52 - 41)));
+    if (w <= 0) return raw;
+    if (w >= 1) return filtered;
+    return Math.exp(Math.log(filtered) * w + Math.log(raw) * (1 - w));
   }
 
   function loop() {
