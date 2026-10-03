@@ -154,14 +154,29 @@
     return 0.045 - (s / 100) * 0.038;
   }
 
-  // YIN: first strong dip is the fundamental, so a low E stays E1 instead of jumping up an octave.
-  function autoCorrelate(buf, sampleRate) {
-    const n = buf.length;
-    let rms = 0;
-    for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
-    rms = Math.sqrt(rms / n);
-    if (rms < gateFromSensitivity()) return -1;
+  // Two-pole lowpass. Bass overtones sit sharp of the fundamental and were
+  // pulling the open E about one yellow bar high. Keep the fundamental.
+  let lpBuf = null;
+  function lowpassBass(buf, sampleRate) {
+    if (!lpBuf || lpBuf.length !== buf.length) lpBuf = new Float32Array(buf.length);
+    const a = Math.exp((-2 * Math.PI * 130) / sampleRate);
+    const b = 1 - a;
+    let z = 0;
+    for (let i = 0; i < buf.length; i++) {
+      z = b * buf[i] + a * z;
+      lpBuf[i] = z;
+    }
+    z = 0;
+    for (let i = 0; i < buf.length; i++) {
+      z = b * lpBuf[i] + a * z;
+      lpBuf[i] = z;
+    }
+    return lpBuf;
+  }
 
+  // YIN: first strong dip is the fundamental, so a low E stays E1 instead of jumping up an octave.
+  function yinFreq(buf, sampleRate) {
+    const n = buf.length;
     const half = n >> 1;
     const yin = new Float32Array(half);
     let running = 0;
@@ -178,7 +193,7 @@
       yin[tau] = running === 0 ? 1 : (sum * tau) / running;
     }
 
-    const threshold = 0.12;
+    const threshold = 0.18;
     let tau = -1;
     for (let i = minLag; i <= maxLag; i++) {
       if (yin[i] < threshold) {
@@ -198,6 +213,18 @@
     const freq = sampleRate / better;
     if (freq < MIN_HZ || freq > MAX_HZ) return -1;
     return freq;
+  }
+
+  function autoCorrelate(buf, sampleRate) {
+    const n = buf.length;
+    let rms = 0;
+    for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / n);
+    if (rms < gateFromSensitivity()) return -1;
+
+    const filtered = yinFreq(lowpassBass(buf, sampleRate), sampleRate);
+    if (filtered > 0) return filtered;
+    return yinFreq(buf, sampleRate);
   }
 
   function loop() {
